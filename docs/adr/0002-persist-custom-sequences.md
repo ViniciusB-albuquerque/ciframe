@@ -1,8 +1,9 @@
-# [Título: decisão de introduzir persistência para sequências de acordes customizadas]
+# Persist custom chord sequences in SQLite inside the container
 
-> Escreva no mesmo estilo de `0001-local-only-docker-deploy.md`: parágrafos
-> corridos, sem seções formais obrigatórias — qual era o problema, o que foi
-> decidido, por quê, e quais consequências/trade-offs isso traz. Apague este
-> bloco de instruções antes de entregar.
+The sequence search only recognized six hardcoded chord sequences in `main.py:40-45`, matched against a `SEQ_FAMOSA` tag precomputed in the CSV. There was no write path, no storage for new sequences, and adding one required editing and redeploying the code. The catalog was also duplicated in the frontend, which showed only four of the six.
 
-[seu texto aqui]
+We're introducing SQLite (Python's standard `sqlite3`, no new dependency) as the store for the sequence catalog, in a single file under `data/`, inside the container and without a volume. On startup the six original sequences are seeded into the table with `INSERT OR IGNORE`. `GET /sequencias` exposes the catalog and `POST /sequencias` accepts anonymous registrations; when the normalized key already exists, the existing sequence is returned instead of creating a duplicate. The `/similares` contract, genre filter, pagination, and `json.dumps` responses stay as they are; internally the sequence branch now reads the catalog from SQLite and matches against `musica.cifra` with the rule that was validated against the old tag with zero false positives and false negatives for all six sequences.
+
+SQLite was chosen because the deploy is a single local container with no external services (see `0001-local-only-docker-deploy.md`) and the `sqlite3` module ships with Python, so persistence costs no extra process, image layer, or operational surface. Keeping one matching rule for old and new sequences avoids two semantics in the same catalog; the identical regression result made that possible without keeping the tag path.
+
+The consequence is that the database lives in the container's writable layer, not on the host. Sequences survive `docker stop` and `docker start`, but they are lost on `docker rm`, on rebuilding and running a new container from the image, or on any recreation of the container — the data is part of the container, not of the image. That is accepted for this local-only scope and must be documented in the run instructions; if persistence across container recreation becomes a requirement, the decision to add a named volume is a separate one. The catalog is also open and anonymous, with no authentication or moderation, and matching is now computed per request over the in-memory CSV instead of reading a precomputed tag, trading the tag's O(1) lookup for a scan of the loaded songs.

@@ -1,48 +1,78 @@
 angular.module('deciframeApp').controller('SequenciaController', function($http, $window, ngProgressFactory, $anchorScroll, $location, GENEROS) {
-  var sequencia1 = {
-    'index': 1,
-    'acordes': [
-      { 'acorde': 'Bm', 'cor': '#2E1C74' },
-      { 'acorde': 'G',  'cor': '#2E1C74' },
-      { 'acorde': 'D',  'cor': '#2E1C74' },
-      { 'acorde': 'A',  'cor': '#2E1C74' }
-  ]};
-  var sequencia2 = {
-    'index': 1,
-    'acordes': [
-      { 'acorde': 'C',  'cor': '#2E1C74' },
-      { 'acorde': 'G',  'cor': '#2E1C74' },
-      { 'acorde': 'Am', 'cor': '#2E1C74' },
-      { 'acorde': 'F',  'cor': '#2E1C74' }
-  ]};
-  var sequencia3 = {
-    'index': 1,
-    'acordes': [
-      { 'acorde': 'Gm', 'cor': '#2E1C74' },
-      { 'acorde': 'F',  'cor': '#2E1C74' }
-  ]};
-  var sequencia4 = {
-    'index': 1,
-    'acordes': [
-      { 'acorde': 'C',  'cor': '#2E1C74' },
-      { 'acorde': 'C7', 'cor': '#2E1C74' },
-      { 'acorde': 'F',  'cor': '#2E1C74' },
-      { 'acorde': 'Fm', 'cor': '#2E1C74' }
-  ]};
+  var COR_PADRAO = '#2E1C74';
+
+  var formatarAcorde = function(acorde) {
+    return acorde.charAt(0).toUpperCase() + acorde.slice(1);
+  };
+
+  var criarSequencia = function(item) {
+    var acordes = item.acordes ? item.acordes.split(';') : [];
+    return {
+      'id': item.id,
+      'nome': item.nome,
+      'chave': item.chave,
+      'acordes': acordes.map(function(acorde) {
+        return { 'acorde': formatarAcorde(acorde), 'cor': COR_PADRAO };
+      })
+    };
+  };
+
   var vm = this;
   vm.sequenciasFamosas = [];
-  vm.sequenciasFamosas.push(sequencia1);
-  vm.sequenciasFamosas.push(sequencia2);
-  vm.sequenciasFamosas.push(sequencia3);
-  vm.sequenciasFamosas.push(sequencia4);
+  vm.carregandoSequencias = false;
+  vm.erroSequencias = "";
   vm.minhaSequencia = {};
+  vm.novaSequencia = { 'nome': "", 'acordes': "" };
+  vm.cadastrando = false;
+  vm.erroCadastro = "";
+  vm.mensagemCadastro = "";
   vm.isSearching = false;
   vm.showSearchResultsCount = false;
-  vm.esfigeSpeech =  "";
+  vm.esfigeSpeech = "";
   vm.musics = [];
   vm.generos = GENEROS;
   vm.meuGenero = "";
+  vm.generoEscolhido = false;
   vm.progressbar = ngProgressFactory.createInstance();
+
+  vm.carregarSequencias = function() {
+    vm.carregandoSequencias = true;
+    vm.erroSequencias = "";
+    $http.get("sequencias")
+      .success(function(data) {
+        vm.sequenciasFamosas = data.map(criarSequencia);
+        vm.carregandoSequencias = false;
+      })
+      .error(function() {
+        vm.erroSequencias = "Não foi possível carregar o catálogo de sequências.";
+        vm.carregandoSequencias = false;
+      });
+  };
+
+  vm.cadastrarSequencia = function() {
+    vm.erroCadastro = "";
+    vm.mensagemCadastro = "";
+    var acordes = (vm.novaSequencia.acordes || "").trim();
+    if (!acordes) {
+      vm.erroCadastro = "Informe ao menos um acorde.";
+      return;
+    }
+    vm.cadastrando = true;
+    $http.post("sequencias", {
+      'nome': (vm.novaSequencia.nome || "").trim(),
+      'acordes': acordes
+    })
+      .success(function() {
+        vm.cadastrando = false;
+        vm.novaSequencia = { 'nome': "", 'acordes': "" };
+        vm.mensagemCadastro = "Sequência cadastrada.";
+        vm.carregarSequencias();
+      })
+      .error(function(data) {
+        vm.cadastrando = false;
+        vm.erroCadastro = (data && data.erro) ? data.erro : "Não foi possível cadastrar a sequência.";
+      });
+  };
 
   vm.temAcorde = function(acorde) {
     if (vm.minhaSequencia.acordes) {
@@ -71,7 +101,7 @@ angular.module('deciframeApp').controller('SequenciaController', function($http,
 
     var apiUrl = "";
     var searchString = "similares?sequencia=".concat(createChordsString(vm.minhaSequencia.acordes));
-    if (vm.meuGenero !== "" && vm.meuGenero !== null) {
+    if (vm.generoEscolhido && vm.meuGenero) {
       searchString += "&generos="+vm.meuGenero;
     }
     $http.get(apiUrl.concat(searchString))
@@ -89,6 +119,13 @@ angular.module('deciframeApp').controller('SequenciaController', function($http,
       });
   }
 
+  vm.aoEscolherGenero = function() {
+    vm.generoEscolhido = !!vm.meuGenero;
+    if (vm.minhaSequencia.acordes) {
+      vm.pesquisarPorSequencia();
+    }
+  }
+
   vm.limparPesquisa = function() {
     vm.minhaSequencia = {};
     vm.musics = [];
@@ -102,4 +139,6 @@ angular.module('deciframeApp').controller('SequenciaController', function($http,
     vm.showSearchResultsCount = false;
     $("body").animate({scrollTop: $("#results").offset().top}, "slow");
   };
+
+  vm.carregarSequencias();
 });

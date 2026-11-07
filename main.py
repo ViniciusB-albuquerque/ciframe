@@ -5,8 +5,10 @@ import sys
 from musica import *
 from collections import OrderedDict
 import unicodedata
+import sequencias_db
 
 app = Flask(__name__)
+sequencias_db.init_db()
 
 def limpa_cifra(raw_cifra):
     cifra = []
@@ -37,12 +39,6 @@ TAM_PAGINA = 100
 genero_musicas = {}
 generos = set()
 acordes = set()
-sequencias = {'BmGDA' : 0,
-        'CGAmF' : 1,
-        'EmG' : 2,
-        'CA7DmG7' : 3,
-        'GmF' : 4,
-        'CC7FFm' : 5}
 
 musicas_dict = {}
 
@@ -163,6 +159,22 @@ def get_generos():
 def get_acordes():
     return json.dumps(list(acordes))
 
+@app.route('/sequencias', methods=['GET'])
+def get_sequencias():
+    return json.dumps(sequencias_db.listar_sequencias())
+
+@app.route('/sequencias', methods=['POST'])
+def post_sequencia():
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
+        return json.dumps({'erro': 'corpo JSON invalido'}), 400
+    try:
+        sequencia, criada = sequencias_db.criar_sequencia(
+            dados.get('nome'), dados.get('acordes'))
+    except ValueError as erro:
+        return json.dumps({'erro': str(erro)}), 400
+    return json.dumps(sequencia), 201 if criada else 200
+
 @app.route('/musica/<m_id>/')
 def get_musica(m_id):
     return json.dumps(musicas[m_id].__dict__)
@@ -188,25 +200,44 @@ def get_similares():
         musica = musicas[id_musica_tag]
         acordes = musica.acordes
     elif sequencia_tag:
-        acordes = sequencia_tag.replace(',','')
         similares = []
 
-        if acordes in sequencias:
-            id_seq = sequencias[acordes]
-            similares = get_pagina(get_similares_por_sequencia(id_seq, generos_key), pagina_tag)
+        sequencia = sequencias_db.buscar_por_chave(sequencia_tag)
+        if sequencia:
+            similares = get_pagina(
+                get_similares_por_sequencia(sequencia['acordes'], generos_key),
+                pagina_tag)
         return json.dumps(similares)
 
     similares = get_similares(acordes, generos_key, id_musica_tag)
 
     return json.dumps(get_pagina(similares, pagina_tag))
 
-def get_similares_por_sequencia(id_seq, generos_key):
+def sequencia_aparece(acordes_seq, cifra):
+    sequencia = sequencias_db.normalizar_acordes(acordes_seq)
+    if not sequencia:
+        return False
+
+    cifra_normalizada = [acorde.lower() for acorde in cifra]
+    tamanho = len(sequencia)
+    contigua = any(
+        cifra_normalizada[i:i + tamanho] == sequencia
+        for i in range(len(cifra_normalizada) - tamanho + 1)
+    )
+    if not contigua:
+        return False
+
+    conjunto_sequencia = set(sequencia)
+    return all(acorde in conjunto_sequencia for acorde in cifra_normalizada)
+
+
+def get_similares_por_sequencia(acordes_seq, generos_key):
     # filtra para melhor desempenho
     collection = apply_filtro(musicas.values(), generos_key)
 
     similares = []
     for musica in collection:
-        if str(id_seq) in musica.seqs_famosas:
+        if sequencia_aparece(acordes_seq, musica.cifra):
             similar = {
                 'id_unico_musica' : musica.id_unico_musica,
                 'id_artista' : musica.id_artista,
